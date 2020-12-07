@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import flask, threading, time, requests, sys
 from typing import List
 
@@ -48,6 +49,12 @@ class CacheEntry:
             """Keep given cache entry forever fresh."""
             while True:
                 item = fetch_item(entry.server_name)
+
+                if item is None:
+                    log(f"Server {self.server_name} has died! Sleeping 10s before trying again.")
+                    time.sleep(10)
+                    continue
+
                 TTL = item["expires_in"]
                 with entry.lock:
                     entry.value = item
