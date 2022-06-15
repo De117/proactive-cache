@@ -1,2 +1,9 @@
+# for synchronous version
 flask
 gunicorn
+requests
+
+# for asynchronous version
+quart       # async Flask substitute
+quart_trio  # trio support for quart, depends on hypercorn
+trio-typing

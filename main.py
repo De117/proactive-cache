@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import flask, threading, time, requests, sys
 from typing import List
 
