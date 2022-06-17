@@ -25,7 +25,8 @@ async def fetch_item(
         server_name: str,
         timeout: float = 10,
         max_attempts: int = 10,
-        base_retry_interval: float = 0.1
+        base_retry_interval: float = 0.1,
+        max_retry_interval: float = 3600,
     ) -> Optional[CacheEntry]:
     """Fetch an item from an origin server, with retries, exponential backoff, and all that jazz."""
     # TODO: allow max_attempts to be infinite?
@@ -34,7 +35,7 @@ async def fetch_item(
 
         if i != 0:
             # Exponential backoff for retries
-            await trio.sleep(base_retry_interval * 2**(i-1))
+            await trio.sleep(min(base_retry_interval * 2**(i-1), max_retry_interval))
 
         try:
             resp = await asks.get(f"{BASE_URL}{server_name}", timeout=timeout)
