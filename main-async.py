@@ -52,7 +52,7 @@ async def fetch_item(
         except asks.errors.RequestTimeout as e:
             pass
 
-        except asks.errors.ConnectivityError as e:
+        except (asks.errors.ConnectivityError, OSError) as e:
             # Try again -- by proceeding to next loop iteration.
             pass
 
