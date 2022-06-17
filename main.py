@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import flask, threading, time, requests, sys
-from typing import List
+from typing import List, Dict, Optional, Union
 
 def log(msg: str):
     now = time.strftime("%T")
@@ -9,10 +9,21 @@ def log(msg: str):
 BASE_URL = "http://localhost:8080/item/"
 
 
-def fetch_item(server_name: str, timeout=10, num_retries=10):
-    """Fetch an item from an origin server, with retries and all that jazz."""
+def fetch_item(
+        server_name: str,
+        timeout: float = 10,
+        max_attempts: int = 10,
+        base_retry_interval: float = 0.1,
+        max_retry_interval: float = 3600,
+    ) -> Optional[Dict[str, Union[str, int]]]:
+    """Fetch an item from an origin server, with retries and exponential backoff."""
 
-    while num_retries > 0:
+    for i in range(max_attempts):
+
+        if i != 0:
+            # Exponential backoff for retries
+            time.sleep(min(base_retry_interval * 2**(i-1), max_retry_interval))
+
         try:
             resp = requests.get(f"{BASE_URL}{server_name}", timeout=timeout)
             if resp.ok:
@@ -31,9 +42,6 @@ def fetch_item(server_name: str, timeout=10, num_retries=10):
             # Try again -- by proceeding to next loop iteration.
             pass
 
-        finally:
-            num_retries -= 1
-
     # If we are here, we failed all the retries.
     return None
 
@@ -48,7 +56,7 @@ class CacheEntry:
         def update(entry: CacheEntry):
             """Keep given cache entry forever fresh."""
             while True:
-                item = fetch_item(entry.server_name)
+                item = fetch_item(entry.server_name, max_attempts=10**12)
                 TTL = item["expires_in"]
                 with entry.lock:
                     entry.value = item
