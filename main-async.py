@@ -2,14 +2,28 @@
 import quart
 from quart_trio import QuartTrio
 import asks, trio, time, sys
+from typing import List, Dict, Set, Tuple, Optional, Any, Iterable
 
-from typing import List, Sequence, Optional, Dict
+
+# Overview
+# --------
+# This is a straightforward translation of the thread-based version. We have:
+#   * a token dict
+#   * a coroutine per dict entry, keeping it fresh
+#   * a coroutine (framework HTTP handler) serving entries from the dict
+#
+# Instead of threads, we have coroutines, which makes it more efficient.
+# It can be also used from synchronous code -- just spin up a Trio event
+# loop on its own thread.
+
 
 def log(msg: str):
     now = time.strftime("%T")
     print(f"[{now}]: {msg}", file=sys.stderr)
 
+
 BASE_URL = "http://localhost:8080/item/"
+
 
 class CacheEntry:
     def __init__(self, token: str, expires_in: int):
@@ -60,71 +74,86 @@ async def fetch_item(
     return None
 
 
-# TODO: make dictionary modifiable at runtime by another coroutine
-async def maintain_fresh(resource_names: Sequence[str], tokens: Dict[str, Optional[CacheEntry]]) -> None:
+async def keep_single_item_fresh(d: Dict[str, Optional[CacheEntry]], name: str, cancel_scope: trio.CancelScope) -> None:
     """
-    Runs forever, keeping the given `tokens` dictionary filled with tokens with given names.
+    Keeps a single item fresh; never returns.
+    """
+    with cancel_scope:
+        # First, we ensure that the entry is present.
+        if d[name] is None:
+            d[name] = await fetch_item(name, max_attempts=10**12)
 
-    `tokens` is passed just so the caller can hold a reference: any initial contents are discarded.
+        # Then we just keep it fresh:
+        # sleep until it's 90% expired, then refetch it.
+        while True:
+            entry = d[name]
+            refetch_at = entry.issued_at + (entry.ttl * 0.90)
+            now = time.time()
+            await trio.sleep(max(0, refetch_at - now))
+
+            d[name] = await fetch_item(name, max_attempts=10**12)
+
+
+class ProactiveCache:
+    """
+    A cache of always-fresh entries.
+
+    Not thread-safe! Don't touch it from more than one thread at the same time.
     """
 
-    # Something along the lines of:
-    #
-    #   * there is a token dict
-    #   * for every entry in the dict, there is a coroutine refreshing it
-    #   * there is a coroutine (framework-provided?) serving HTTP responses
-    #
-    # This corresponds cleanly to the thread-based version. We could do better:
-    #
-    #   * there is a token dict
-    #   * there is a coroutine, refreshing every entry in the dict
-    #   (maybe these two are created with `before_serving`?)
-    #   * there is a coroutine (framework-provided?) serving entries from the dict as HTTP entries
+    def __init__(self, nursery: trio.Nursery, resource_names: Iterable[str] = ()):
+        self.nursery = nursery
+        self._entries: Dict[str, Optional[CacheEntry]] = {}
+        self._cancel_scopes: Dict[str, trio.CancelScope] = {}
+        for name in resource_names:
+            self.add_resource(name)
 
-    tokens.clear()
-    for name in resource_names:
-        tokens[name] = None
+    def add_resource(self, resource_name: str) -> None:
+        """
+        Add a new resource to the cache.
+        """
+        if resource_name not in self._entries:
+            cancel_scope = trio.CancelScope()
+            self._entries[resource_name] = None
+            self._cancel_scopes[resource_name] = cancel_scope
+            self.nursery.start_soon(keep_single_item_fresh, self._entries, resource_name, cancel_scope)
 
-    async with trio.open_nursery() as nursery:
+    def remove_resource(self, resource_name: str) -> None:
+        """
+        Forget all about the resource.
+        """
+        if resource_name in self._entries:
+            self._cancel_scopes[resource_name].cancel()
+            del self._cancel_scopes[resource_name]
+            del self._entries[resource_name]
 
-        async def keep_single_item_fresh(d: dict, name: str) -> None:
-            """
-            Keeps a single item fresh; never returns.
-            """
-            # First, we ensure that the entry is present.
-            if d[name] is None:
-                d[name] = await fetch_item(name, max_attempts=10**12)
+    def __del__(self) -> None:
+        for name in self._entries:
+            self._cancel_scopes[name].cancel()
+        del self._cancel_scopes
+        del self._entries
 
-            # Then we just keep it fresh:
-            # sleep until it's 90% expired, then refetch it.
-            while True:
-                entry = d[name]
-                refetch_at = entry.issued_at + (entry.ttl * 0.90)
-                now = time.time()
-                await trio.sleep(max(0, refetch_at - now))
-
-                d[name] = await fetch_item(name, max_attempts=10**12)
-
-        # Start one coroutine per item.
-        for name in tokens.keys():
-            nursery.start_soon(keep_single_item_fresh, tokens, name)
+    async def get(self, resource_name: str) -> Optional[CacheEntry]:
+        return self._entries.get(resource_name, None)
 
 
-TOKEN_CACHE: Dict[str, Optional[CacheEntry]] = {}
 
-
-# The server serving fresh entries.
 app = QuartTrio("proactive-cache-server")
+CACHE = None
+
+# `CACHE` needs a nursery, but `app` has no `nursery` yet.
+# So we set up the cache at framework initialization time.
 
 @app.before_serving
-async def setup_background_job():
-    app.nursery.start_soon(maintain_fresh, ["alpha", "bravo", "charlie", "delta"], TOKEN_CACHE)
+async def initialize_cache():
+    global CACHE
+    CACHE = ProactiveCache(app.nursery, ["alpha", "bravo", "charlie", "delta"])
 
 
 @app.route("/item/<name>", methods=["GET"])
 async def handle_request(name):
     try:
-        entry = TOKEN_CACHE[name]
+        entry = await CACHE.get(name)
         if entry is None:
             raise KeyError
         time_left = entry.expires_at - time.time()
