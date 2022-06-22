@@ -27,7 +27,7 @@ BASE_URL = "http://localhost:8080/item/"
 
 class CacheEntry:
     def __init__(self, token: str, expires_in: int):
-        now = time.time()
+        now = trio.current_time()
 
         self.token: str = token
         self.ttl: int = expires_in
@@ -87,10 +87,7 @@ async def keep_single_item_fresh(d: Dict[str, Optional[CacheEntry]], name: str, 
         # sleep until it's 90% expired, then refetch it.
         while True:
             entry = d[name]
-            refetch_at = entry.issued_at + (entry.ttl * 0.90)
-            now = time.time()
-            await trio.sleep(max(0, refetch_at - now))
-
+            await trio.sleep_until(entry.issued_at + 0.90 * entry.ttl)
             d[name] = await fetch_item(name, max_attempts=10**12)
 
 
@@ -156,7 +153,7 @@ async def handle_request(name):
         entry = await CACHE.get(name)
         if entry is None:
             raise KeyError
-        time_left = entry.expires_at - time.time()
+        time_left = entry.expires_at - trio.current_time()
         return {"content": entry.token, "expires_in": max(0, int(time_left))}
     except KeyError:
         quart.abort(404)
