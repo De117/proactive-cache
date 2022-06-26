@@ -82,7 +82,7 @@ class ProactiveCache:
             with entry.lock:
                 return entry.value
         except KeyError as e:
-            raise KeyError("Non-existent origin server name!") from e
+            return None
 
 
 CACHE = ProactiveCache(["alpha", "bravo", "charlie", "delta"])
@@ -92,10 +92,10 @@ app = flask.Flask("proactive-cache-server")
 
 @app.route("/item/<name>", methods=["GET"])
 def handle_request(name):
-    try:
-        token = CACHE.get_token(name)
+    token = CACHE.get_token(name)
+    if token is not None:
         return flask.jsonify(token)
-    except KeyError:
+    else:
         flask.abort(404)
 
 
