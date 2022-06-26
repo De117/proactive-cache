@@ -107,7 +107,7 @@ class ProactiveCache:
 
     def add_resource(self, resource_name: str) -> None:
         """
-        Add a new resource to the cache.
+        Add a new resource to the cache, if not already present.
         """
         if resource_name not in self._entries:
             cancel_scope = trio.CancelScope()
@@ -131,6 +131,7 @@ class ProactiveCache:
         del self._entries
 
     async def get(self, resource_name: str) -> Optional[CacheEntry]:
+        """Returns the entry if it is present and not expired"""
         entry = self._entries.get(resource_name, None)
         if entry is not None and trio.current_time() <= entry.expires_at:
             return entry
@@ -157,7 +158,7 @@ async def handle_request(name):
         if entry is None:
             raise KeyError
         time_left = entry.expires_at - trio.current_time()
-        return {"content": entry.token, "expires_in": max(0, int(time_left))}
+        return {"content": entry.token, "expires_in": int(time_left)}
     except KeyError:
         quart.abort(404)
 
