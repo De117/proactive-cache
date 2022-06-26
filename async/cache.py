@@ -38,14 +38,13 @@ class CacheEntry:
 async def fetch_item(
         server_name: str,
         timeout: float = 10,
-        max_attempts: int = 10,
         base_retry_interval: float = 0.1,
         max_retry_interval: float = 3600,
-    ) -> Optional[CacheEntry]:
-    """Fetch an item from an origin server, with retries, exponential backoff, and all that jazz."""
-    # TODO: allow max_attempts to be infinite?
+    ) -> CacheEntry:
+    """Fetch an item from an origin server, with infinite retries and exponential backoff."""
 
-    for i in range(max_attempts):
+    i = 0
+    while True:
 
         if i != 0:
             # Exponential backoff for retries
@@ -70,8 +69,7 @@ async def fetch_item(
             # Try again -- by proceeding to next loop iteration.
             pass
 
-    # If we are here, we failed all the attempts.
-    return None
+        i += 1
 
 
 async def keep_single_item_fresh(d: Dict[str, Optional[CacheEntry]], name: str, cancel_scope: trio.CancelScope) -> None:
@@ -81,14 +79,15 @@ async def keep_single_item_fresh(d: Dict[str, Optional[CacheEntry]], name: str, 
     with cancel_scope:
         # First, we ensure that the entry is present.
         if d[name] is None:
-            d[name] = await fetch_item(name, max_attempts=10**12)
+            d[name] = await fetch_item(name)
 
         # Then we just keep it fresh:
         # sleep until it's 90% expired, then refetch it.
         while True:
             entry = d[name]
+            assert entry is not None  # mypy demands that we be sure of it
             await trio.sleep_until(entry.issued_at + 0.90 * entry.ttl)
-            d[name] = await fetch_item(name, max_attempts=10**12)
+            d[name] = await fetch_item(name)
 
 
 class ProactiveCache:

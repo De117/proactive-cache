@@ -12,13 +12,13 @@ BASE_URL = "http://localhost:8080/item/"
 def fetch_item(
         server_name: str,
         timeout: float = 10,
-        max_attempts: int = 10,
         base_retry_interval: float = 0.1,
         max_retry_interval: float = 3600,
     ) -> Optional[Dict[str, Union[str, int]]]:
-    """Fetch an item from an origin server, with retries and exponential backoff."""
+    """Fetch an item from an origin server, with infinite retries and exponential backoff."""
 
-    for i in range(max_attempts):
+    i = 0
+    while True:
 
         if i != 0:
             # Exponential backoff for retries
@@ -42,8 +42,7 @@ def fetch_item(
             # Try again -- by proceeding to next loop iteration.
             pass
 
-    # If we are here, we failed all the retries.
-    return None
+        i += 1
 
 
 class CacheEntry:
@@ -57,7 +56,7 @@ class CacheEntry:
         def update(entry: CacheEntry):
             """Keep given cache entry forever fresh."""
             while True:
-                item = fetch_item(entry.server_name, max_attempts=10**12)
+                item = fetch_item(entry.server_name)
                 now = time.time()
                 TTL = item["expires_in"]
                 with entry.lock:
