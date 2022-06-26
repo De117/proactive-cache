@@ -52,14 +52,17 @@ class CacheEntry:
         self.server_name = server_name
         self.lock = threading.Lock()
         self.value = None
+        self.expires_at = 0  # earlier than anything sensible
 
         def update(entry: CacheEntry):
             """Keep given cache entry forever fresh."""
             while True:
                 item = fetch_item(entry.server_name, max_attempts=10**12)
+                now = time.time()
                 TTL = item["expires_in"]
                 with entry.lock:
                     entry.value = item
+                    entry.expires_at = now + TTL
                 # Sleep until it's nearly stale.
                 t_sleep = 0.9 * TTL
                 log(f"[{self.server_name}]: sleeping for {t_sleep}")
@@ -77,12 +80,12 @@ class ProactiveCache:
         self._entries = {sname: CacheEntry(sname) for sname in server_names}
 
     def get_token(self, server_name: str):
-        try:
-            entry = self._entries[server_name]
+        entry = self._entries.get(server_name, None)
+        if entry is not None:
             with entry.lock:
-                return entry.value
-        except KeyError as e:
-            return None
+                if time.time() < entry.expires_at:
+                    return entry.value
+        return None
 
 
 CACHE = ProactiveCache(["alpha", "bravo", "charlie", "delta"])

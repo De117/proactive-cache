@@ -131,7 +131,10 @@ class ProactiveCache:
         del self._entries
 
     async def get(self, resource_name: str) -> Optional[CacheEntry]:
-        return self._entries.get(resource_name, None)
+        entry = self._entries.get(resource_name, None)
+        if entry is not None and trio.current_time() <= entry.expires_at:
+            return entry
+        return None
 
 
 
