@@ -51,7 +51,7 @@ class CacheEntry:
     def __init__(self, server_name: str):
         self.server_name = server_name
         self.lock = threading.Lock()
-        self.value = None
+        self.content: Optional[str] = None
         self.expires_at = 0  # earlier than anything sensible
 
         def update(entry: CacheEntry):
@@ -61,7 +61,7 @@ class CacheEntry:
                 now = time.time()
                 TTL = item["expires_in"]
                 with entry.lock:
-                    entry.value = item
+                    entry.content = item["content"]
                     entry.expires_at = now + TTL
                 # Sleep until it's nearly stale.
                 t_sleep = 0.9 * TTL
@@ -83,8 +83,9 @@ class ProactiveCache:
         entry = self._entries.get(server_name, None)
         if entry is not None:
             with entry.lock:
-                if time.time() < entry.expires_at:
-                    return entry.value
+                time_left = entry.expires_at - time.time()
+                if time_left >= 0:
+                    return {"content": entry.content, "expires_in": int(time_left)}
         return None
 
 
