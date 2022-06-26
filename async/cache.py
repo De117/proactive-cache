@@ -162,6 +162,7 @@ async def handle_request(name):
 if __name__ == "__main__":
     # Hand off to hypercorn
     import os, shutil
+    os.chdir(os.path.dirname(__file__)) # The only simple way to be able to execute this from anywhere.
     executable = shutil.which("hypercorn")
     assert executable is not None, "No hypercorn in PATH!"
-    os.execve(executable, ["ignored", "--worker-class=trio", "--bind=0.0.0.0:1234", "main-async:app"], os.environ)
+    os.execve(executable, ["ignored", "--worker-class=trio", "--bind=0.0.0.0:1234", "cache:app"], os.environ)

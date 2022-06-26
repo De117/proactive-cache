@@ -20,5 +20,7 @@ def handle_request(name):
 if __name__ == "__main__":
     # Hand off to gunicorn
     import os, shutil
+    os.chdir(os.path.dirname(__file__))  # The only simple way to be able to execute this from anywhere.
     executable = shutil.which("gunicorn")
+    assert executable is not None, "No gunicorn in PATH!"
     os.execve(executable, ["ignored", "--bind=0.0.0.0:8080", "origin-server:app"], os.environ)
