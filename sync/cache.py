@@ -8,13 +8,20 @@ def log(msg: str):
 
 BASE_URL = "http://localhost:8080/item/"
 
+class Item:
+    def __init__(self, content: str, expires_in: int):
+        now = time.time()
+        self.content: str = content
+        self.ttl: int = expires_in
+        self.expires_at: float = expires_in + now
+
 
 def fetch_item(
         server_name: str,
         timeout: float = 10,
         base_retry_interval: float = 0.1,
         max_retry_interval: float = 3600,
-    ) -> Optional[Dict[str, Union[str, int]]]:
+    ) -> Item:
     """Fetch an item from an origin server, with infinite retries and exponential backoff."""
 
     i = 0
@@ -33,7 +40,7 @@ def fetch_item(
 
                 # All is OK, we have a fresh token.
                 log(f"Got token for {server_name}, expires in {token['expires_in']}s")
-                return token
+                return Item(content=token["content"], expires_in=token["expires_in"])
 
         except requests.Timeout as e:
             pass
@@ -51,19 +58,18 @@ class CacheEntry:
         self.server_name = server_name
         self.lock = threading.Lock()
         self.content: Optional[str] = None
-        self.expires_at = 0  # earlier than anything sensible
+        self.expires_at: float = 0  # earlier than anything sensible
 
         def update(entry: CacheEntry):
             """Keep given cache entry forever fresh."""
             while True:
                 item = fetch_item(entry.server_name)
                 now = time.time()
-                TTL = item["expires_in"]
                 with entry.lock:
-                    entry.content = item["content"]
-                    entry.expires_at = now + TTL
+                    entry.content = item.content
+                    entry.expires_at = now + item.ttl
                 # Sleep until it's nearly stale.
-                t_sleep = 0.9 * TTL
+                t_sleep = 0.9 * item.ttl
                 log(f"[{self.server_name}]: sleeping for {t_sleep}")
                 time.sleep(t_sleep)
                 log(f"[{self.server_name}]: woke up")
